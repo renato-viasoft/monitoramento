@@ -1,0 +1,184 @@
+services:
+  redis:
+    image: redis
+    container_name: redis
+    networks:
+      - redis
+
+  limiter:
+    image: limiter
+    container_name: limiter
+    build:
+      context: services/rate-limiter
+      dockerfile: Dockerfile
+    networks:
+      - redis
+      - limiter
+    depends_on:
+      - redis
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_TIMEOUT: 2000
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_URL: jdbc:mysql://192.168.89.115:3306/monitoring
+
+  gateway:
+    image: gateway
+    container_name: gateway
+    build:
+      context: services/gateway
+      dockerfile: Dockerfile
+    ports:
+      - "3040:8080"
+    networks:
+      - limiter
+      - gateway
+    environment:
+      API_URI: http://api:8080/
+      LIMITER_URI: http://limiter:8080/
+      GRAFANA_URI: http://grafana:3000/
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: monitoring
+    depends_on:
+      - limiter
+
+  api:
+    image: api
+    container_name: api
+    build:
+      context: services/api
+      dockerfile: Dockerfile
+    networks:
+      - monitoring
+      - gateway
+    volumes:
+      - ./services/api/opentelemetry-javaagent.jar:/etc/opentelemetry-javaagent.jar
+    depends_on:
+      - gateway
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_TIMEOUT: 2000
+      JAVA_TOOL_OPTIONS: -Xdebug -agentlib:jdwp=transport=dt_socket,server=y,address=*:5005,suspend=n -javaagent:/etc/opentelemetry-javaagent.jar
+      OTEL_RESOURCE_ATTRIBUTES: service.name=api
+      OTEL_METRICS_EXPORTER: otlp
+      OTEL_TRACES_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://collector:4318
+      OTEL_EXPORTER_OTLP_HEADERS: client_id=abc
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+
+  collector:
+    image: otel/opentelemetry-collector-contrib
+    container_name: collector
+    restart: unless-stopped
+    ports:
+      - "4318:4318"
+    deploy:
+      resources:
+        limits:
+          memory: 125M
+    volumes:
+      - ./collector/config.yml:/etc/otelcol/config.yaml
+    networks:
+      - monitoring
+    depends_on:
+      - api
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.15.2
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+    ports:
+      - "9200:9200"
+    networks:
+      - monitoring
+
+  # kibana:
+  #   image: docker.elastic.co/kibana/kibana:7.15.2
+  #   container_name: kibana
+  #   environment:
+  #     - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+  #   ports:
+  #     - "5601:5601"
+  #   networks:
+  #     - monitoring
+
+  # cadvisor:
+  #   image: gcr.io/cadvisor/cadvisor:latest
+  #   container_name: cadvisor
+  #   volumes:
+  #     - /:/rootfs:ro
+  #     - /var/run:/var/run:ro
+  #     - /sys:/sys:ro
+  #     - /var/lib/docker/:/var/lib/docker:ro
+  #   networks:
+  #     - monitoring
+
+  # node_exporter:
+  #   image: quay.io/prometheus/node-exporter:latest
+  #   container_name: node_exporter
+  #   pid: host
+  #   restart: unless-stopped
+  #   volumes:
+  #     - /proc:/host/proc:ro
+  #     - /sys:/host/sys:ro
+  #     - /:/rootfs:ro
+  #   command:
+  #     - '--path.procfs=/host/proc'
+  #     - '--path.rootfs=/rootfs'
+  #     - '--path.sysfs=/host/sys'
+  #     - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+  #   networks:
+  #     - monitoring
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring
+    # depends_on:
+    #   - collector
+    #   - cadvisor
+
+  # grafana:
+  #   image: grafana/grafana
+  #   container_name: grafana
+  #   ports:
+  #     - "3010:3000"
+  #   networks:
+  #     - monitoring
+  #     - gateway
+  #   volumes:
+  #     - ./grafana_data:/var/lib/grafana
+  #   depends_on:
+  #     - prometheus
+
+networks:
+  redis:
+    driver: bridge
+  limiter:
+    driver: bridge
+  gateway:
+    driver: bridge
+  monitoring:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

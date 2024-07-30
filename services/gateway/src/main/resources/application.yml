@@ -1,0 +1,54 @@
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: test
+        uri: https://httpbin.org/
+        predicates:
+          - Path=/get
+
+      - id: rate-limiter
+        uri: ${LIMITER_URI:http://localhost:8080}
+        predicates:
+          - Path=/limiter/**
+        filters:
+          - StripPrefix=1
+
+      - id: grafana
+        uri: ${GRAFANA_URI:http://localhost:3000}
+        predicates:
+          - Path=/grafana/**, /grafana
+        filters:
+          - StripPrefix=1
+
+      - id: api
+        uri: ${API_URI:http://localhost:8080}
+        predicates:
+          - Path=/api, /api/**
+        filters:
+          - StripPrefix=1
+
+      - id: api-gateway-limited
+        uri: ${API_URI:http://localhost:8080}
+        predicates:
+          - Path=/api-gateway-limited/**
+        filters:
+          - StripPrefix=1
+          - name: RequestRateLimiter
+            args:
+              redis-rate-limiter.replenishRate: 1
+              redis-rate-limiter.burstCapacity: 1
+              key-resolver: "#{@keyResolver}"
+
+      - id: api-service-limited
+        uri: ${API_URI:http://localhost:8080}
+        predicates:
+          - Path=/api-service-limited/**
+        filters:
+          - StripPrefix=1
+          - name: AuthorizationFilterFactory
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}

@@ -1,0 +1,28 @@
+exporters:
+  elasticsearch:
+    endpoints: ["http://elasticsearch:9200"]
+    index: "otel-metrics"
+    pipeline: "metrics"
+
+  prometheus:
+    endpoint: ":8889"
+    namespace: "otel"
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: ":4317"
+      http:
+        endpoint: ":4318"
+        include_metadata: true
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: 
+        - otlp
+      exporters: 
+        - elasticsearch
+        - prometheus
