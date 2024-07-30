@@ -1,13 +1,3 @@
-exporters:
-  elasticsearch:
-    endpoints: ["http://elasticsearch:9200"]
-    index: "otel-metrics"
-    pipeline: "metrics"
-
-  prometheus:
-    endpoint: ":8889"
-    namespace: "otel"
-
 receivers:
   otlp:
     protocols:
@@ -17,12 +7,30 @@ receivers:
         endpoint: ":4318"
         include_metadata: true
 
+processors:
+  batch:
+
+exporters:
+  prometheus:
+    endpoint: ":8889"
+    namespace: "otel"
+  logging:
+
+extensions:
+  health_check:
+    endpoint: ":13133"
+    response_body: {
+      "healthy": "UP",
+      "unhealthy": "DOWN"
+    }
+
 service:
   extensions: [health_check]
+  telemetry:
+    logs:
+      level: "debug"
   pipelines:
     metrics:
-      receivers: 
-        - otlp
-      exporters: 
-        - elasticsearch
-        - prometheus
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [logging, prometheus]
